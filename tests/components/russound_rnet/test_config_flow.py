@@ -3,6 +3,7 @@
 from unittest.mock import AsyncMock, patch
 
 from homeassistant.components.russound_rnet.const import (
+    CONF_ENABLED_ZONES,
     CONF_SOURCES,
     CONF_ZONES,
     DOMAIN,
@@ -236,8 +237,41 @@ async def test_options_flow(
 
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {"source_1": "Spotify", "source_3": "Vinyl"},
+        {
+            "source_1": "Spotify",
+            "source_3": "Vinyl",
+            CONF_ENABLED_ZONES: ["1", "2"],
+        },
     )
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == {CONF_SOURCES: {"1": "Spotify", "3": "Vinyl"}}
+    assert result["data"] == {
+        CONF_SOURCES: {"1": "Spotify", "3": "Vinyl"},
+        CONF_ENABLED_ZONES: ["1", "2"],
+    }
+
+
+async def test_options_flow_disable_zone(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    mock_russound_client: AsyncMock,
+) -> None:
+    """Test options flow to disable a zone."""
+    mock_config_entry.add_to_hass(hass)
+
+    await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.options.async_init(
+        mock_config_entry.entry_id
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "source_1": "TV",
+            CONF_ENABLED_ZONES: ["1"],
+        },
+    )
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_ENABLED_ZONES] == ["1"]
