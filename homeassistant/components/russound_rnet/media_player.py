@@ -131,22 +131,39 @@ class RussoundRNETDevice(
             name=zone_name,
         )
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator."""
+    @property
+    def _zone_info(self) -> RNETZoneInfo | None:
+        """Get current zone info from coordinator data."""
         if self.coordinator.data and self._zone_id in self.coordinator.data:
-            info: RNETZoneInfo = self.coordinator.data[self._zone_id]
-            self._attr_available = True
-            self._attr_state = (
-                MediaPlayerState.ON if info.power else MediaPlayerState.OFF
-            )
-            self._attr_volume_level = info.volume / 50.0
-            source_id = info.source
-            if source_id in self._source_id_name:
-                self._attr_source = self._source_id_name[source_id]
-        else:
-            self._attr_available = False
-        self.async_write_ha_state()
+            return self.coordinator.data[self._zone_id]
+        return None
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return super().available and self._zone_info is not None
+
+    @property
+    def state(self) -> MediaPlayerState | None:
+        """Return the state of the device."""
+        if (info := self._zone_info) is None:
+            return None
+        return MediaPlayerState.ON if info.power else MediaPlayerState.OFF
+
+    @property
+    def volume_level(self) -> float | None:
+        """Return the volume level (0..1)."""
+        if (info := self._zone_info) is None:
+            return None
+        return info.volume / 50.0
+
+    @property
+    def source(self) -> str | None:
+        """Return the current input source."""
+        if (info := self._zone_info) is None:
+            return None
+        source_id = info.source
+        return self._source_id_name.get(source_id)
 
     async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1."""
