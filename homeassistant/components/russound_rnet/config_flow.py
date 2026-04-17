@@ -154,10 +154,16 @@ class RussoundRNETConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    def __init__(self) -> None:
+        """Initialize the config flow."""
+        self._data: dict[str, Any] = {}
+        self._total_zones: int = 0
+        self._selected_zones: list[str] = []
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the initial step."""
+        """Handle step 1: connection and sources."""
         errors: dict[str, str] = {}
         if user_input is not None:
             host = user_input[CONF_HOST]
@@ -171,24 +177,80 @@ class RussoundRNETConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
             else:
-                sources = _sources_from_config(user_input)
                 num_controllers = int(user_input.get(CONF_CONTROLLERS, 1))
-                total_zones = num_controllers * ZONES_PER_CONTROLLER
-                zones = {str(i): f"Zone {i}" for i in range(1, total_zones + 1)}
-                return self.async_create_entry(
-                    title=f"{host}:{port}",
-                    data={
-                        CONF_HOST: host,
-                        CONF_PORT: port,
-                        CONF_SOURCES: sources,
-                        CONF_ZONES: zones,
-                    },
-                )
+                self._total_zones = num_controllers * ZONES_PER_CONTROLLER
+                self._data = {
+                    CONF_HOST: host,
+                    CONF_PORT: port,
+                    CONF_SOURCES: _sources_from_config(user_input),
+                }
+                return await self.async_step_zones()
 
         return self.async_show_form(
             step_id="user",
             data_schema=_schema_with_defaults(user_input),
             errors=errors,
+        )
+
+    async def async_step_zones(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle step 2: select which zones to enable."""
+        all_zone_ids = [str(i) for i in range(1, self._total_zones + 1)]
+
+        if user_input is not None:
+            self._selected_zones = user_input.get(CONF_ENABLED_ZONES, all_zone_ids)
+            return await self.async_step_zone_names()
+
+        zone_options = [
+            SelectOptionDict(value=str(i), label=f"Zone {i}")
+            for i in range(1, self._total_zones + 1)
+        ]
+
+        return self.async_show_form(
+            step_id="zones",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_ENABLED_ZONES, default=all_zone_ids
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=zone_options,
+                            multiple=True,
+                            mode=SelectSelectorMode.LIST,
+                        )
+                    ),
+                }
+            ),
+        )
+
+    async def async_step_zone_names(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle step 3: name the selected zones."""
+        if user_input is not None:
+            zones = {
+                zone_id: user_input.get(f"zone_{zone_id}", f"Zone {zone_id}")
+                for zone_id in self._selected_zones
+            }
+            return self.async_create_entry(
+                title=f"{self._data[CONF_HOST]}:{self._data[CONF_PORT]}",
+                data={
+                    **self._data,
+                    CONF_ZONES: zones,
+                },
+                options={CONF_ENABLED_ZONES: self._selected_zones},
+            )
+
+        schema: VolDictType = {}
+        for zone_id in self._selected_zones:
+            schema[
+                vol.Required(f"zone_{zone_id}", default=f"Zone {zone_id}")
+            ] = str
+
+        return self.async_show_form(
+            step_id="zone_names",
+            data_schema=vol.Schema(schema),
         )
 
     async def async_step_import(self, import_data: dict[str, Any]) -> ConfigFlowResult:

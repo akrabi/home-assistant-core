@@ -26,6 +26,17 @@
           "host": "The IP address or hostname of your Russound controller.",
           "port": "The network port of your Russound controller."
         }
+      },
+      "zones": {
+        "title": "Select zones",
+        "description": "Select which zones to enable. Deselect any unused zones.",
+        "data": {
+          "enabled_zones": "Zones"
+        }
+      },
+      "zone_names": {
+        "title": "Name your zones",
+        "description": "Enter a name for each selected zone."
       }
     }
   },

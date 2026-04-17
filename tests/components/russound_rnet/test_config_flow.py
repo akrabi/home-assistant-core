@@ -21,12 +21,13 @@ PATCH_RNET_CLIENT = (
 
 
 async def test_user_flow_success(hass: HomeAssistant) -> None:
-    """Test successful user flow."""
+    """Test successful user flow with 3 steps."""
     with patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls:
         instance = mock_cls.return_value
         instance.connect = AsyncMock()
         instance.disconnect = AsyncMock()
 
+        # Step 1: connection and sources
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": SOURCE_USER}
         )
@@ -45,6 +46,28 @@ async def test_user_flow_success(hass: HomeAssistant) -> None:
             },
         )
 
+        # Step 2: select zones
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "zones"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_ENABLED_ZONES: ["1", "2", "3"]},
+        )
+
+        # Step 3: name zones
+        assert result["type"] is FlowResultType.FORM
+        assert result["step_id"] == "zone_names"
+
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                "zone_1": "Living Room",
+                "zone_2": "Kitchen",
+                "zone_3": "Bedroom",
+            },
+        )
+
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "192.168.1.10:9621"
     assert result["data"] == {
@@ -52,14 +75,12 @@ async def test_user_flow_success(hass: HomeAssistant) -> None:
         CONF_PORT: 9621,
         CONF_SOURCES: {"1": "TV", "2": "Radio"},
         CONF_ZONES: {
-            "1": "Zone 1",
-            "2": "Zone 2",
-            "3": "Zone 3",
-            "4": "Zone 4",
-            "5": "Zone 5",
-            "6": "Zone 6",
+            "1": "Living Room",
+            "2": "Kitchen",
+            "3": "Bedroom",
         },
     }
+    assert result["options"] == {CONF_ENABLED_ZONES: ["1", "2", "3"]}
 
 
 async def test_user_flow_cannot_connect(hass: HomeAssistant) -> None:
