@@ -173,6 +173,7 @@ class RussoundRNETDevice(
             self._zone_within,
             round(volume * 50),
         )
+        self.coordinator.async_request_refresh()
 
     async def async_turn_on(self) -> None:
         """Turn the media player on."""
@@ -182,6 +183,7 @@ class RussoundRNETDevice(
             self._zone_within,
             True,
         )
+        self.coordinator.async_request_refresh()
 
     async def async_turn_off(self) -> None:
         """Turn off media player."""
@@ -191,6 +193,7 @@ class RussoundRNETDevice(
             self._zone_within,
             False,
         )
+        self.coordinator.async_request_refresh()
 
     async def async_mute_volume(self, mute: bool) -> None:
         """Send mute command.
@@ -202,6 +205,7 @@ class RussoundRNETDevice(
             self._controller_id,
             self._zone_within,
         )
+        self.coordinator.async_request_refresh()
 
     async def async_select_source(self, source: str) -> None:
         """Set the input source."""
@@ -213,3 +217,4 @@ class RussoundRNETDevice(
                 self._zone_within,
                 source_id,
             )
+            self.coordinator.async_request_refresh()

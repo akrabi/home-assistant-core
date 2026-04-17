@@ -101,5 +101,3 @@ class RussoundRNETCoordinator(DataUpdateCoordinator[dict[int, RNETZoneInfo]]):
                 await self.client.disconnect()
             await self._ensure_connected()
             await func(*args)
-        # Refresh state after command
-        await self.async_request_refresh()
