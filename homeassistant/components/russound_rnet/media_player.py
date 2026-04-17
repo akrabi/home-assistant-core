@@ -5,68 +5,68 @@ from __future__ import annotations
 import logging
 import math
 
-from russound import russound
-import voluptuous as vol
+from aiorussound.rnet.client import RussoundRNETClient
 
 from homeassistant.components.media_player import (
-    PLATFORM_SCHEMA as MEDIA_PLAYER_PLATFORM_SCHEMA,
     MediaPlayerEntity,
     MediaPlayerEntityFeature,
     MediaPlayerState,
 )
-from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+
+from . import RussoundRNETConfigEntry
+from .const import CONF_SOURCES, CONF_ZONES, DOMAIN, RNET_EXCEPTIONS
 
 _LOGGER = logging.getLogger(__name__)
 
-CONF_ZONES = "zones"
-CONF_SOURCES = "sources"
+PARALLEL_UPDATES = 1
 
 
-ZONE_SCHEMA = vol.Schema({vol.Required(CONF_NAME): cv.string})
-
-SOURCE_SCHEMA = vol.Schema({vol.Required(CONF_NAME): cv.string})
-
-PLATFORM_SCHEMA = MEDIA_PLAYER_PLATFORM_SCHEMA.extend(
-    {
-        vol.Required(CONF_HOST): cv.string,
-        vol.Required(CONF_NAME): cv.string,
-        vol.Required(CONF_PORT): cv.port,
-        vol.Required(CONF_ZONES): vol.Schema({cv.positive_int: ZONE_SCHEMA}),
-        vol.Required(CONF_SOURCES): vol.All(cv.ensure_list, [SOURCE_SCHEMA]),
-    }
-)
+@callback
+def _get_sources(config_entry: RussoundRNETConfigEntry) -> dict[str, str]:
+    """Get sources from options or data."""
+    if CONF_SOURCES in config_entry.options:
+        return config_entry.options[CONF_SOURCES]
+    return config_entry.data.get(CONF_SOURCES, {})
 
 
-def setup_platform(
+async def async_setup_entry(
     hass: HomeAssistant,
-    config: ConfigType,
-    add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None,
+    config_entry: RussoundRNETConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Set up the Russound RNET platform."""
-    host = config.get(CONF_HOST)
-    port = config.get(CONF_PORT)
+    """Set up the Russound RNET media player platform."""
+    client = config_entry.runtime_data
+    sources = _get_sources(config_entry)
+    zones = config_entry.data.get(CONF_ZONES, {})
 
-    if host is None or port is None:
-        _LOGGER.error("Invalid config. Expected %s and %s", CONF_HOST, CONF_PORT)
-        return
+    # Build source maps preserving source IDs (1-based)
+    # source_id_name: {1: "TV", 3: "Vinyl"} - maps source ID to name
+    # source_name_id: {"TV": 1, "Vinyl": 3} - maps name to source ID
+    source_id_name = {int(idx): name for idx, name in sources.items()}
+    source_name_id = {name: idx for idx, name in source_id_name.items()}
+    source_names = [
+        source_id_name[idx] for idx in sorted(source_id_name.keys())
+    ]
 
-    russ = russound.Russound(host, port)
-    russ.connect()
-
-    sources = [source["name"] for source in config[CONF_SOURCES]]
-
-    if russ.is_connected():
-        for zone_id, extra in config[CONF_ZONES].items():
-            add_entities(
-                [RussoundRNETDevice(hass, russ, sources, zone_id, extra)], True
+    entities: list[RussoundRNETDevice] = []
+    for zone_id_str, zone_name in zones.items():
+        zone_id = int(zone_id_str)
+        entities.append(
+            RussoundRNETDevice(
+                client,
+                source_names,
+                source_id_name,
+                source_name_id,
+                config_entry.entry_id,
+                zone_id,
+                zone_name,
             )
-    else:
-        _LOGGER.error("Not connected to %s:%s", host, port)
+        )
+
+    async_add_entities(entities, True)
 
 
 class RussoundRNETDevice(MediaPlayerEntity):
@@ -79,76 +79,94 @@ class RussoundRNETDevice(MediaPlayerEntity):
         | MediaPlayerEntityFeature.TURN_OFF
         | MediaPlayerEntityFeature.SELECT_SOURCE
     )
+    _attr_has_entity_name = True
+    _attr_name = None
 
-    def __init__(self, hass, russ, sources, zone_id, extra):
-        """Initialise the Russound RNET device."""
-        self._attr_name = extra["name"]
-        self._russ = russ
+    def __init__(
+        self,
+        client: RussoundRNETClient,
+        sources: list[str],
+        source_id_name: dict[int, str],
+        source_name_id: dict[str, int],
+        namespace: str,
+        zone_id: int,
+        zone_name: str,
+    ) -> None:
+        """Initialize the Russound RNET device."""
+        self._client = client
         self._attr_source_list = sources
+        self._source_id_name = source_id_name
+        self._source_name_id = source_name_id
         # Each controller has a maximum of 6 zones, every increment of 6 zones
         # maps to an additional controller for easier backward compatibility
-        self._controller_id = str(math.ceil(zone_id / 6))
+        self._controller_id = math.ceil(zone_id / 6)
         # Each zone resets to 1-6 per controller
         self._zone_id = (zone_id - 1) % 6 + 1
+        self._attr_unique_id = f"{namespace}_{zone_id}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"{namespace}_{zone_id}")},
+            manufacturer="Russound",
+            model="RNET",
+            name=zone_name,
+        )
 
-    def update(self) -> None:
+    async def async_update(self) -> None:
         """Retrieve latest state."""
-        # Updated this function to make a single call to get_zone_info, so that
-        # with a single call we can get On/Off, Volume and Source, reducing the
-        # amount of traffic and speeding up the update process.
         try:
-            ret = self._russ.get_zone_info(self._controller_id, self._zone_id, 4)
-        except BrokenPipeError:
-            _LOGGER.error("Broken Pipe Error, trying to reconnect to Russound RNET")
-            self._russ.connect()
-            ret = self._russ.get_zone_info(self._controller_id, self._zone_id, 4)
-
-        _LOGGER.debug("ret= %s", ret)
-        if ret is not None:
-            _LOGGER.debug(
-                "Updating status for RNET zone %s on controller %s",
-                self._zone_id,
-                self._controller_id,
+            info = await self._client.get_all_zone_info(
+                self._controller_id, self._zone_id
             )
-            if ret[0] == 0:
-                self._attr_state = MediaPlayerState.OFF
-            else:
-                self._attr_state = MediaPlayerState.ON
-            self._attr_volume_level = ret[2] * 2 / 100.0
-            # Returns 0 based index for source.
-            index = ret[1]
-            # Possibility exists that user has defined list of all sources.
-            # If a source is set externally that is beyond the defined list then
-            # an exception will be thrown.
-            # In this case return and unknown source (None)
-            if self.source_list and 0 <= index < len(self.source_list):
-                self._attr_source = self.source_list[index]
+        except RNET_EXCEPTIONS:
+            _LOGGER.warning(
+                "Could not update zone info for controller %s zone %s",
+                self._controller_id,
+                self._zone_id,
+            )
+            self._attr_available = False
+            return
+
+        self._attr_available = True
+
+        if info.power:
+            self._attr_state = MediaPlayerState.ON
         else:
-            _LOGGER.error("Could not update status for zone %s", self._zone_id)
+            self._attr_state = MediaPlayerState.OFF
 
-    def set_volume_level(self, volume: float) -> None:
-        """Set volume level.  Volume has a range (0..1).
+        self._attr_volume_level = info.volume / 50.0
+        # Source is 1-based from the library model; look up by ID
+        source_id = info.source
+        if source_id in self._source_id_name:
+            self._attr_source = self._source_id_name[source_id]
 
-        Translate this to a range of (0..100) as expected
-        by _russ.set_volume()
-        """
-        self._russ.set_volume(self._controller_id, self._zone_id, volume * 100)
+    async def async_set_volume_level(self, volume: float) -> None:
+        """Set volume level, range 0..1."""
+        await self._client.set_volume(
+            self._controller_id, self._zone_id, round(volume * 50)
+        )
 
-    def turn_on(self) -> None:
+    async def async_turn_on(self) -> None:
         """Turn the media player on."""
-        self._russ.set_power(self._controller_id, self._zone_id, "1")
+        await self._client.set_zone_power(
+            self._controller_id, self._zone_id, True
+        )
 
-    def turn_off(self) -> None:
+    async def async_turn_off(self) -> None:
         """Turn off media player."""
-        self._russ.set_power(self._controller_id, self._zone_id, "0")
+        await self._client.set_zone_power(
+            self._controller_id, self._zone_id, False
+        )
 
-    def mute_volume(self, mute: bool) -> None:
-        """Send mute command."""
-        self._russ.toggle_mute(self._controller_id, self._zone_id)
+    async def async_mute_volume(self, mute: bool) -> None:
+        """Send mute command.
 
-    def select_source(self, source: str) -> None:
+        Note: The RNET protocol only supports toggle, not explicit mute state.
+        """
+        await self._client.toggle_mute(self._controller_id, self._zone_id)
+
+    async def async_select_source(self, source: str) -> None:
         """Set the input source."""
-        if self.source_list and source in self.source_list:
-            index = self.source_list.index(source)
-            # 0 based value for source
-            self._russ.set_source(self._controller_id, self._zone_id, index)
+        if source in self._source_name_id:
+            source_id = self._source_name_id[source]
+            await self._client.select_source(
+                self._controller_id, self._zone_id, source_id
+            )

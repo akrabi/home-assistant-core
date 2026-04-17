@@ -391,6 +391,7 @@ aioridwell==2025.09.0
 # homeassistant.components.ruckus_unleashed
 aioruckus==0.42
 
+# homeassistant.components.russound_rnet
 # homeassistant.components.russound_rio
 aiorussound==5.0.1
 
@@ -2863,8 +2864,7 @@ rova==0.4.1
 # homeassistant.components.rpi_power
 rpi-bad-power==0.1.0
 
-# homeassistant.components.russound_rnet
-russound==0.2.0
+
 
 # homeassistant.components.ruuvitag_ble
 ruuvitag-ble==0.4.0
