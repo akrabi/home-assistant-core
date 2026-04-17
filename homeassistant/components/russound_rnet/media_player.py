@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import logging
 import math
 
-from aiorussound.rnet.client import RussoundRNETClient
+from aiorussound.rnet.client import RNETZoneInfo
 
 from homeassistant.components.media_player import (
     MediaPlayerEntity,
@@ -18,16 +15,11 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import RussoundRNETConfigEntry
-from .const import CONF_ENABLED_ZONES, CONF_SOURCES, CONF_ZONES, DOMAIN, RNET_EXCEPTIONS
-
-_LOGGER = logging.getLogger(__name__)
-
-PARALLEL_UPDATES = 1
-
-# Delay between zone polls to avoid overwhelming serial bridges
-_INTER_ZONE_DELAY = 0.3
+from .const import CONF_ENABLED_ZONES, CONF_SOURCES, CONF_ZONES, DOMAIN
+from .coordinator import RussoundRNETCoordinator
 
 
 @callback
@@ -44,29 +36,26 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the Russound RNET media player platform."""
-    client = config_entry.runtime_data
+    coordinator = config_entry.runtime_data
     sources = _get_sources(config_entry)
     zones = config_entry.data.get(CONF_ZONES, {})
 
     # Build source maps preserving source IDs (1-based)
-    # source_id_name: {1: "TV", 3: "Vinyl"} - maps source ID to name
-    # source_name_id: {"TV": 1, "Vinyl": 3} - maps name to source ID
     source_id_name = {int(idx): name for idx, name in sources.items()}
     source_name_id = {name: idx for idx, name in source_id_name.items()}
     source_names = [source_id_name[idx] for idx in sorted(source_id_name.keys())]
 
-    entities: list[RussoundRNETDevice] = []
-
     # Get enabled zones from options (default: all zones)
     enabled_zones: list[str] | None = config_entry.options.get(CONF_ENABLED_ZONES)
 
+    entities: list[RussoundRNETDevice] = []
     for zone_id_str, zone_name in zones.items():
         if enabled_zones is not None and zone_id_str not in enabled_zones:
             continue
         zone_id = int(zone_id_str)
         entities.append(
             RussoundRNETDevice(
-                client,
+                coordinator,
                 source_names,
                 source_id_name,
                 source_name_id,
@@ -76,7 +65,7 @@ async def async_setup_entry(
             )
         )
 
-    async_add_entities(entities, True)
+    async_add_entities(entities)
 
     # Remove entities and devices for disabled zones
     if enabled_zones is not None:
@@ -89,7 +78,6 @@ async def async_setup_entry(
             zone_id = int(zone_id_str)
             identifier = (DOMAIN, f"{config_entry.entry_id}_{zone_id}")
 
-            # Remove entity
             entries = er.async_entries_for_config_entry(
                 ent_reg, config_entry.entry_id
             )
@@ -97,13 +85,14 @@ async def async_setup_entry(
                 if entry.unique_id == f"{config_entry.entry_id}_{zone_id}":
                     ent_reg.async_remove(entry.entity_id)
 
-            # Remove device
             device = dev_reg.async_get_device(identifiers={identifier})
             if device is not None:
                 dev_reg.async_remove_device(device.id)
 
 
-class RussoundRNETDevice(MediaPlayerEntity):
+class RussoundRNETDevice(
+    CoordinatorEntity[RussoundRNETCoordinator], MediaPlayerEntity
+):
     """Representation of a Russound RNET device."""
 
     _attr_supported_features = (
@@ -118,7 +107,7 @@ class RussoundRNETDevice(MediaPlayerEntity):
 
     def __init__(
         self,
-        client: RussoundRNETClient,
+        coordinator: RussoundRNETCoordinator,
         sources: list[str],
         source_id_name: dict[int, str],
         source_name_id: dict[str, int],
@@ -127,15 +116,13 @@ class RussoundRNETDevice(MediaPlayerEntity):
         zone_name: str,
     ) -> None:
         """Initialize the Russound RNET device."""
-        self._client = client
+        super().__init__(coordinator)
         self._attr_source_list = sources
         self._source_id_name = source_id_name
         self._source_name_id = source_name_id
-        # Each controller has a maximum of 6 zones, every increment of 6 zones
-        # maps to an additional controller for easier backward compatibility
+        self._zone_id = zone_id
         self._controller_id = math.ceil(zone_id / 6)
-        # Each zone resets to 1-6 per controller
-        self._zone_id = (zone_id - 1) % 6 + 1
+        self._zone_within = (zone_id - 1) % 6 + 1
         self._attr_unique_id = f"{namespace}_{zone_id}"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{namespace}_{zone_id}")},
@@ -144,106 +131,47 @@ class RussoundRNETDevice(MediaPlayerEntity):
             name=zone_name,
         )
 
-    async def _ensure_connected(self) -> bool:
-        """Ensure the client is connected, reconnecting if needed."""
-        if self._client.is_connected:
-            return True
-        _LOGGER.debug("Reconnecting RNET client")
-        with contextlib.suppress(*RNET_EXCEPTIONS):
-            await self._client.connect()
-            # Small delay after reconnect to let serial bridge settle
-            await asyncio.sleep(_INTER_ZONE_DELAY)
-            return True
-        return False
-
-    async def async_update(self) -> None:
-        """Retrieve latest state."""
-        # Small delay between zone polls to avoid overwhelming serial bridges
-        await asyncio.sleep(_INTER_ZONE_DELAY)
-
-        if not await self._ensure_connected():
-            self._attr_available = False
-            return
-
-        try:
-            info = await self._client.get_all_zone_info(
-                self._controller_id, self._zone_id
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        if self.coordinator.data and self._zone_id in self.coordinator.data:
+            info: RNETZoneInfo = self.coordinator.data[self._zone_id]
+            self._attr_available = True
+            self._attr_state = (
+                MediaPlayerState.ON if info.power else MediaPlayerState.OFF
             )
-        except RNET_EXCEPTIONS as err:
-            _LOGGER.debug(
-                "First poll attempt failed for controller %s zone %s: %s",
-                self._controller_id,
-                self._zone_id,
-                err,
-            )
-            # Connection likely dropped — reconnect and retry once
-            with contextlib.suppress(*RNET_EXCEPTIONS):
-                await self._client.disconnect()
-            if not await self._ensure_connected():
-                self._attr_available = False
-                return
-            try:
-                info = await self._client.get_all_zone_info(
-                    self._controller_id, self._zone_id
-                )
-            except RNET_EXCEPTIONS as err2:
-                _LOGGER.warning(
-                    "Could not update zone info for controller %s zone %s: %s",
-                    self._controller_id,
-                    self._zone_id,
-                    err2,
-                )
-                self._attr_available = False
-                return
-
-        self._attr_available = True
-
-        if info.power:
-            self._attr_state = MediaPlayerState.ON
+            self._attr_volume_level = info.volume / 50.0
+            source_id = info.source
+            if source_id in self._source_id_name:
+                self._attr_source = self._source_id_name[source_id]
         else:
-            self._attr_state = MediaPlayerState.OFF
-
-        self._attr_volume_level = info.volume / 50.0
-        # Source is 1-based from the library model; look up by ID
-        source_id = info.source
-        if source_id in self._source_id_name:
-            self._attr_source = self._source_id_name[source_id]
-
-    async def _send_command(self, func, *args) -> None:
-        """Send a command with reconnect retry."""
-        try:
-            await func(*args)
-        except RNET_EXCEPTIONS:
-            # Reconnect and retry once
-            with contextlib.suppress(*RNET_EXCEPTIONS):
-                await self._client.disconnect()
-            if await self._ensure_connected():
-                await func(*args)
+            self._attr_available = False
+        self.async_write_ha_state()
 
     async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1."""
-        await self._send_command(
-            self._client.set_volume,
+        await self.coordinator.async_send_command(
+            self.coordinator.client.set_volume,
             self._controller_id,
-            self._zone_id,
+            self._zone_within,
             round(volume * 50),
         )
 
     async def async_turn_on(self) -> None:
         """Turn the media player on."""
-        await self._send_command(
-            self._client.set_zone_power,
+        await self.coordinator.async_send_command(
+            self.coordinator.client.set_zone_power,
             self._controller_id,
-            self._zone_id,
+            self._zone_within,
             True,
         )
 
     async def async_turn_off(self) -> None:
         """Turn off media player."""
-        await self._send_command(
-            self._client.set_zone_power,
+        await self.coordinator.async_send_command(
+            self.coordinator.client.set_zone_power,
             self._controller_id,
-            self._zone_id,
+            self._zone_within,
             False,
         )
 
@@ -252,19 +180,19 @@ class RussoundRNETDevice(MediaPlayerEntity):
 
         Note: The RNET protocol only supports toggle, not explicit mute state.
         """
-        await self._send_command(
-            self._client.toggle_mute,
+        await self.coordinator.async_send_command(
+            self.coordinator.client.toggle_mute,
             self._controller_id,
-            self._zone_id,
+            self._zone_within,
         )
 
     async def async_select_source(self, source: str) -> None:
         """Set the input source."""
         if source in self._source_name_id:
             source_id = self._source_name_id[source]
-            await self._send_command(
-                self._client.select_source,
+            await self.coordinator.async_send_command(
+                self.coordinator.client.select_source,
                 self._controller_id,
-                self._zone_id,
+                self._zone_within,
                 source_id,
             )
