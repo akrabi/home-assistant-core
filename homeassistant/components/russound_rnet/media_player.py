@@ -15,6 +15,7 @@ from homeassistant.components.media_player import (
     MediaPlayerState,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -76,6 +77,16 @@ async def async_setup_entry(
         )
 
     async_add_entities(entities, True)
+
+    # Remove entities for disabled zones from the entity registry
+    if enabled_zones is not None:
+        ent_reg = er.async_get(hass)
+        entries = er.async_entries_for_config_entry(ent_reg, config_entry.entry_id)
+        for entry in entries:
+            # unique_id format: "{entry_id}_{zone_id}"
+            parts = entry.unique_id.rsplit("_", 1)
+            if len(parts) == 2 and parts[1] not in enabled_zones:
+                ent_reg.async_remove(entry.entity_id)
 
 
 class RussoundRNETDevice(MediaPlayerEntity):
