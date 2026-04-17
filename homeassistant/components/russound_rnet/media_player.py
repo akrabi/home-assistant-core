@@ -15,7 +15,7 @@ from homeassistant.components.media_player import (
     MediaPlayerState,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -78,15 +78,29 @@ async def async_setup_entry(
 
     async_add_entities(entities, True)
 
-    # Remove entities for disabled zones from the entity registry
+    # Remove entities and devices for disabled zones
     if enabled_zones is not None:
         ent_reg = er.async_get(hass)
-        entries = er.async_entries_for_config_entry(ent_reg, config_entry.entry_id)
-        for entry in entries:
-            # unique_id format: "{entry_id}_{zone_id}"
-            parts = entry.unique_id.rsplit("_", 1)
-            if len(parts) == 2 and parts[1] not in enabled_zones:
-                ent_reg.async_remove(entry.entity_id)
+        dev_reg = dr.async_get(hass)
+        all_zones = config_entry.data.get(CONF_ZONES, {})
+        disabled_zone_ids = set(all_zones.keys()) - set(enabled_zones)
+
+        for zone_id_str in disabled_zone_ids:
+            zone_id = int(zone_id_str)
+            identifier = (DOMAIN, f"{config_entry.entry_id}_{zone_id}")
+
+            # Remove entity
+            entries = er.async_entries_for_config_entry(
+                ent_reg, config_entry.entry_id
+            )
+            for entry in entries:
+                if entry.unique_id == f"{config_entry.entry_id}_{zone_id}":
+                    ent_reg.async_remove(entry.entity_id)
+
+            # Remove device
+            device = dev_reg.async_get_device(identifiers={identifier})
+            if device is not None:
+                dev_reg.async_remove_device(device.id)
 
 
 class RussoundRNETDevice(MediaPlayerEntity):
