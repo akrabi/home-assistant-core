@@ -91,9 +91,12 @@ class RussoundRNETCoordinator(DataUpdateCoordinator[dict[int, RNETZoneInfo]]):
         return data
 
     async def async_send_command(
-        self, func: Callable[..., Coroutine[Any, Any, Any]], *args: Any,
+        self,
+        zone_id: int,
+        func: Callable[..., Coroutine[Any, Any, Any]],
+        *args: Any,
     ) -> None:
-        """Send a command with reconnect retry."""
+        """Send a command with reconnect retry, then poll the affected zone."""
         try:
             await func(*args)
         except RNET_EXCEPTIONS:
@@ -101,3 +104,14 @@ class RussoundRNETCoordinator(DataUpdateCoordinator[dict[int, RNETZoneInfo]]):
                 await self.client.disconnect()
             await self._ensure_connected()
             await func(*args)
+
+        # Poll just the affected zone and push updated data to entities
+        controller_id = math.ceil(zone_id / 6)
+        zone_within = (zone_id - 1) % 6 + 1
+        try:
+            info = await self.client.get_all_zone_info(controller_id, zone_within)
+        except RNET_EXCEPTIONS:
+            return
+        if self.data is not None:
+            self.data[zone_id] = info
+        self.async_set_updated_data(self.data)

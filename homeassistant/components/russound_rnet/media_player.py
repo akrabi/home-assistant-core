@@ -130,18 +130,6 @@ class RussoundRNETDevice(
             model="RNET",
             name=zone_name,
         )
-        # Optimistic state overrides (cleared on coordinator update)
-        self._optimistic_state: MediaPlayerState | None = None
-        self._optimistic_volume: float | None = None
-        self._optimistic_source: str | None = None
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Handle updated data from the coordinator — clears optimistic state."""
-        self._optimistic_state = None
-        self._optimistic_volume = None
-        self._optimistic_source = None
-        self.async_write_ha_state()
 
     @property
     def _zone_info(self) -> RNETZoneInfo | None:
@@ -158,8 +146,6 @@ class RussoundRNETDevice(
     @property
     def state(self) -> MediaPlayerState | None:
         """Return the state of the device."""
-        if self._optimistic_state is not None:
-            return self._optimistic_state
         if (info := self._zone_info) is None:
             return None
         return MediaPlayerState.ON if info.power else MediaPlayerState.OFF
@@ -167,8 +153,6 @@ class RussoundRNETDevice(
     @property
     def volume_level(self) -> float | None:
         """Return the volume level (0..1)."""
-        if self._optimistic_volume is not None:
-            return self._optimistic_volume
         if (info := self._zone_info) is None:
             return None
         return info.volume / 50.0
@@ -176,8 +160,6 @@ class RussoundRNETDevice(
     @property
     def source(self) -> str | None:
         """Return the current input source."""
-        if self._optimistic_source is not None:
-            return self._optimistic_source
         if (info := self._zone_info) is None:
             return None
         source_id = info.source
@@ -185,39 +167,33 @@ class RussoundRNETDevice(
 
     async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1."""
-        self._optimistic_volume = volume
-        self.async_write_ha_state()
         await self.coordinator.async_send_command(
+            self._zone_id,
             self.coordinator.client.set_volume,
             self._controller_id,
             self._zone_within,
             round(volume * 50),
         )
-        await self.coordinator.async_request_refresh()
 
     async def async_turn_on(self) -> None:
         """Turn the media player on."""
-        self._optimistic_state = MediaPlayerState.ON
-        self.async_write_ha_state()
         await self.coordinator.async_send_command(
+            self._zone_id,
             self.coordinator.client.set_zone_power,
             self._controller_id,
             self._zone_within,
             True,
         )
-        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self) -> None:
         """Turn off media player."""
-        self._optimistic_state = MediaPlayerState.OFF
-        self.async_write_ha_state()
         await self.coordinator.async_send_command(
+            self._zone_id,
             self.coordinator.client.set_zone_power,
             self._controller_id,
             self._zone_within,
             False,
         )
-        await self.coordinator.async_request_refresh()
 
     async def async_mute_volume(self, mute: bool) -> None:
         """Send mute command.
@@ -225,22 +201,20 @@ class RussoundRNETDevice(
         Note: The RNET protocol only supports toggle, not explicit mute state.
         """
         await self.coordinator.async_send_command(
+            self._zone_id,
             self.coordinator.client.toggle_mute,
             self._controller_id,
             self._zone_within,
         )
-        await self.coordinator.async_request_refresh()
 
     async def async_select_source(self, source: str) -> None:
         """Set the input source."""
         if source in self._source_name_id:
-            self._optimistic_source = source
-            self.async_write_ha_state()
             source_id = self._source_name_id[source]
             await self.coordinator.async_send_command(
+                self._zone_id,
                 self.coordinator.client.select_source,
                 self._controller_id,
                 self._zone_within,
                 source_id,
             )
-            await self.coordinator.async_request_refresh()
