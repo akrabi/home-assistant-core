@@ -11,9 +11,9 @@
     "step": {
       "user": {
         "data": {
+          "controllers": "Number of controllers",
           "host": "[%key:common::config_flow::data::host%]",
           "port": "[%key:common::config_flow::data::port%]",
-          "controllers": "Number of controllers",
           "source_1": "Name of source #1",
           "source_2": "Name of source #2",
           "source_3": "Name of source #3",
@@ -22,9 +22,9 @@
           "source_6": "Name of source #6"
         },
         "data_description": {
+          "controllers": "Number of Russound controllers connected (each supports 6 zones).",
           "host": "The IP address or hostname of your Russound controller.",
-          "port": "The network port of your Russound controller.",
-          "controllers": "Number of Russound controllers connected (each supports 6 zones)."
+          "port": "The network port of your Russound controller."
         }
       }
     }
@@ -33,6 +33,7 @@
     "step": {
       "init": {
         "data": {
+          "enabled_zones": "Enabled zones",
           "source_1": "[%key:component::russound_rnet::config::step::user::data::source_1%]",
           "source_2": "[%key:component::russound_rnet::config::step::user::data::source_2%]",
           "source_3": "[%key:component::russound_rnet::config::step::user::data::source_3%]",
@@ -40,7 +41,10 @@
           "source_5": "[%key:component::russound_rnet::config::step::user::data::source_5%]",
           "source_6": "[%key:component::russound_rnet::config::step::user::data::source_6%]"
         },
-        "title": "Configure sources"
+        "data_description": {
+          "enabled_zones": "Select which zones to enable. Unselected zones will be hidden."
+        },
+        "title": "Configure sources and zones"
       }
     }
   }

@@ -1,5 +1,7 @@
 """Constants for the Russound RNET integration."""
 
+import asyncio
+
 from aiorussound import CommandError
 
 from homeassistant.const import Platform
@@ -10,6 +12,7 @@ PLATFORMS = [Platform.MEDIA_PLAYER]
 
 CONF_SOURCES = "sources"
 CONF_ZONES = "zones"
+CONF_ENABLED_ZONES = "enabled_zones"
 
 CONF_SOURCE_1 = "source_1"
 CONF_SOURCE_2 = "source_2"
@@ -25,5 +28,6 @@ RNET_EXCEPTIONS = (
     CommandError,
     ConnectionRefusedError,
     TimeoutError,
+    asyncio.IncompleteReadError,
     OSError,
 )

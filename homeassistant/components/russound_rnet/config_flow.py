@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from typing import Any
 
@@ -17,9 +19,19 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import callback
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 from homeassistant.helpers.typing import VolDictType
 
 from .const import (
+    CONF_ENABLED_ZONES,
     CONF_SOURCE_1,
     CONF_SOURCE_2,
     CONF_SOURCE_3,
@@ -49,12 +61,17 @@ OPTIONS_FOR_DATA: VolDictType = {vol.Optional(source): str for source in SOURCES
 
 CONF_CONTROLLERS = "controllers"
 
+CONNECT_RETRIES = 3
+CONNECT_RETRY_DELAY = 1.0
+
 DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
         vol.Required(CONF_PORT, default=9621): int,
-        vol.Required(CONF_CONTROLLERS, default=1): vol.In(
-            {i: str(i) for i in range(1, MAX_CONTROLLERS + 1)}
+        vol.Required(CONF_CONTROLLERS, default=1): NumberSelector(
+            NumberSelectorConfig(
+                min=1, max=MAX_CONTROLLERS, step=1, mode=NumberSelectorMode.BOX
+            )
         ),
         **OPTIONS_FOR_DATA,
     }
@@ -74,13 +91,62 @@ def _sources_from_config(data: dict[str, Any]) -> dict[str, str]:
     }
 
 
+@callback
+def _schema_with_defaults(user_input: dict[str, Any] | None) -> vol.Schema:
+    """Build the data schema with suggested values from previous input."""
+    if user_input is None:
+        return DATA_SCHEMA
+
+    schema: VolDictType = {}
+    for key in DATA_SCHEMA.schema:
+        if isinstance(key, (vol.Optional, vol.Required)) and key.schema in user_input:
+            default = key.default() if callable(key.default) else key.default
+            description = {"suggested_value": user_input[key.schema]}
+            new_key: vol.Optional | vol.Required
+            if isinstance(key, vol.Optional):
+                new_key = vol.Optional(
+                    key.schema, default=default, description=description
+                )
+            else:
+                new_key = vol.Required(
+                    key.schema, default=default, description=description
+                )
+            schema[new_key] = DATA_SCHEMA.schema[key]
+        else:
+            schema[key] = DATA_SCHEMA.schema[key]
+    return vol.Schema(schema)
+
+
 async def _async_validate_connection(host: str, port: int) -> None:
-    """Validate the user input allows us to connect."""
-    client = RussoundRNETClient(RussoundTcpConnectionHandler(host, port))
-    try:
-        await client.connect()
-    finally:
-        await client.disconnect()
+    """Validate the user input allows us to connect.
+
+    Retries up to CONNECT_RETRIES times with a delay between attempts,
+    since the RNET protocol can be flaky on initial connection.
+    """
+    last_err: Exception | None = None
+    for attempt in range(CONNECT_RETRIES):
+        client = RussoundRNETClient(RussoundTcpConnectionHandler(host, port))
+        try:
+            await client.connect()
+        except RNET_EXCEPTIONS as err:
+            last_err = err
+            _LOGGER.debug(
+                "Connection attempt %d/%d to %s:%s failed: %s",
+                attempt + 1,
+                CONNECT_RETRIES,
+                host,
+                port,
+                err,
+            )
+            if attempt < CONNECT_RETRIES - 1:
+                await asyncio.sleep(CONNECT_RETRY_DELAY)
+        else:
+            return
+        finally:
+            with contextlib.suppress(*RNET_EXCEPTIONS):
+                await client.disconnect()
+    if last_err is not None:
+        raise last_err
 
 
 class RussoundRNETConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -96,9 +162,7 @@ class RussoundRNETConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             host = user_input[CONF_HOST]
             port = user_input[CONF_PORT]
-            self._async_abort_entries_match(
-                {CONF_HOST: host, CONF_PORT: port}
-            )
+            self._async_abort_entries_match({CONF_HOST: host, CONF_PORT: port})
             try:
                 await _async_validate_connection(host, port)
             except RNET_EXCEPTIONS:
@@ -108,7 +172,7 @@ class RussoundRNETConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 sources = _sources_from_config(user_input)
-                num_controllers = user_input.get(CONF_CONTROLLERS, 1)
+                num_controllers = int(user_input.get(CONF_CONTROLLERS, 1))
                 total_zones = num_controllers * ZONES_PER_CONTROLLER
                 zones = {str(i): f"Zone {i}" for i in range(1, total_zones + 1)}
                 return self.async_create_entry(
@@ -122,12 +186,12 @@ class RussoundRNETConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
 
         return self.async_show_form(
-            step_id="user", data_schema=DATA_SCHEMA, errors=errors
+            step_id="user",
+            data_schema=_schema_with_defaults(user_input),
+            errors=errors,
         )
 
-    async def async_step_import(
-        self, import_data: dict[str, Any]
-    ) -> ConfigFlowResult:
+    async def async_step_import(self, import_data: dict[str, Any]) -> ConfigFlowResult:
         """Handle import from YAML configuration."""
         self._async_abort_entries_match(
             {CONF_HOST: import_data[CONF_HOST], CONF_PORT: import_data[CONF_PORT]}
@@ -184,21 +248,57 @@ class RussoundRNETOptionsFlowHandler(OptionsFlow):
             return self.config_entry.options[CONF_SOURCES]
         return self.config_entry.data.get(CONF_SOURCES, {})
 
+    @callback
+    def _all_zones(self) -> dict[str, str]:
+        """Get all available zones from config data."""
+        return self.config_entry.data.get(CONF_ZONES, {})
+
+    @callback
+    def _enabled_zones(self) -> list[str]:
+        """Get currently enabled zone IDs."""
+        if CONF_ENABLED_ZONES in self.config_entry.options:
+            return self.config_entry.options[CONF_ENABLED_ZONES]
+        # Default: all zones enabled
+        return list(self._all_zones().keys())
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(
-                title="", data={CONF_SOURCES: _sources_from_config(user_input)}
+                title="",
+                data={
+                    CONF_SOURCES: _sources_from_config(user_input),
+                    CONF_ENABLED_ZONES: user_input.get(
+                        CONF_ENABLED_ZONES, list(self._all_zones().keys())
+                    ),
+                },
             )
 
         previous_sources = self._previous_sources()
+        all_zones = self._all_zones()
+        enabled_zones = self._enabled_zones()
+
+        # Build zone select options
+        zone_select_options = [
+            SelectOptionDict(value=zone_id, label=zone_name)
+            for zone_id, zone_name in all_zones.items()
+        ]
 
         options: VolDictType = {
             _key_for_source(idx + 1, source, previous_sources): str
             for idx, source in enumerate(SOURCES)
         }
+        options[vol.Optional(CONF_ENABLED_ZONES, default=enabled_zones)] = (
+            SelectSelector(
+                SelectSelectorConfig(
+                    options=zone_select_options,
+                    multiple=True,
+                    mode=SelectSelectorMode.LIST,
+                )
+            )
+        )
 
         return self.async_show_form(
             step_id="init",
