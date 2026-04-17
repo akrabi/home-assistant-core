@@ -620,6 +620,7 @@ FLOWS = {
         "rova",
         "rpi_power",
         "ruckus_unleashed",
+        "russound_rnet",
         "russound_rio",
         "ruuvi_gateway",
         "ruuvitag_ble",
