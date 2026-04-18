@@ -229,10 +229,16 @@ class RussoundRNETConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Handle step 3: name the selected zones."""
         if user_input is not None:
-            zones = {
-                zone_id: user_input.get(f"zone_{zone_id}", f"Zone {zone_id}")
-                for zone_id in self._selected_zones
-            }
+            # Store ALL zones in data (selected get custom names, others get defaults)
+            all_zone_ids = [str(i) for i in range(1, self._total_zones + 1)]
+            zones = {}
+            for zone_id in all_zone_ids:
+                if zone_id in self._selected_zones:
+                    zones[zone_id] = user_input.get(
+                        f"zone_{zone_id}", f"Zone {zone_id}"
+                    )
+                else:
+                    zones[zone_id] = f"Zone {zone_id}"
             return self.async_create_entry(
                 title=f"{self._data[CONF_HOST]}:{self._data[CONF_PORT]}",
                 data={

@@ -78,6 +78,9 @@ async def test_user_flow_success(hass: HomeAssistant) -> None:
             "1": "Living Room",
             "2": "Kitchen",
             "3": "Bedroom",
+            "4": "Zone 4",
+            "5": "Zone 5",
+            "6": "Zone 6",
         },
     }
     assert result["options"] == {CONF_ENABLED_ZONES: ["1", "2", "3"]}
