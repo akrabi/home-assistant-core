@@ -24,7 +24,13 @@
         "data_description": {
           "controllers": "Number of Russound controllers connected (each supports 6 zones).",
           "host": "The IP address or hostname of your Russound controller.",
-          "port": "The network port of your Russound controller."
+          "port": "The network port of your Russound controller.",
+          "source_1": "Name for source input #1. Leave blank if unused.",
+          "source_2": "Name for source input #2. Leave blank if unused.",
+          "source_3": "Name for source input #3. Leave blank if unused.",
+          "source_4": "Name for source input #4. Leave blank if unused.",
+          "source_5": "Name for source input #5. Leave blank if unused.",
+          "source_6": "Name for source input #6. Leave blank if unused."
         }
       },
       "zones": {
@@ -53,7 +59,13 @@
           "source_6": "[%key:component::russound_rnet::config::step::user::data::source_6%]"
         },
         "data_description": {
-          "enabled_zones": "Select which zones to enable. Unselected zones will be hidden."
+          "enabled_zones": "Select which zones to enable. Unselected zones will be hidden.",
+          "source_1": "[%key:component::russound_rnet::config::step::user::data_description::source_1%]",
+          "source_2": "[%key:component::russound_rnet::config::step::user::data_description::source_2%]",
+          "source_3": "[%key:component::russound_rnet::config::step::user::data_description::source_3%]",
+          "source_4": "[%key:component::russound_rnet::config::step::user::data_description::source_4%]",
+          "source_5": "[%key:component::russound_rnet::config::step::user::data_description::source_5%]",
+          "source_6": "[%key:component::russound_rnet::config::step::user::data_description::source_6%]"
         },
         "title": "Configure sources and zones"
       }

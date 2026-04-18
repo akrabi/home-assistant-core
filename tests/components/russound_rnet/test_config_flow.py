@@ -18,11 +18,19 @@ from tests.common import MockConfigEntry
 PATCH_RNET_CLIENT = (
     "homeassistant.components.russound_rnet.config_flow.RussoundRNETClient"
 )
+PATCH_TCP_HANDLER = (
+    "homeassistant.components.russound_rnet.config_flow.RussoundTcpConnectionHandler"
+)
+PATCH_SETUP_ENTRY = "homeassistant.components.russound_rnet.async_setup_entry"
 
 
 async def test_user_flow_success(hass: HomeAssistant) -> None:
     """Test successful user flow with 3 steps."""
-    with patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls:
+    with (
+        patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls,
+        patch(PATCH_TCP_HANDLER),
+        patch(PATCH_SETUP_ENTRY, return_value=True),
+    ):
         instance = mock_cls.return_value
         instance.connect = AsyncMock()
         instance.disconnect = AsyncMock()
@@ -88,7 +96,10 @@ async def test_user_flow_success(hass: HomeAssistant) -> None:
 
 async def test_user_flow_cannot_connect(hass: HomeAssistant) -> None:
     """Test user flow with connection error."""
-    with patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls:
+    with (
+        patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls,
+        patch(PATCH_TCP_HANDLER),
+    ):
         instance = mock_cls.return_value
         instance.connect = AsyncMock(side_effect=ConnectionRefusedError)
         instance.disconnect = AsyncMock()
@@ -110,7 +121,10 @@ async def test_user_flow_cannot_connect(hass: HomeAssistant) -> None:
 
 async def test_user_flow_unknown_error(hass: HomeAssistant) -> None:
     """Test user flow with unknown error."""
-    with patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls:
+    with (
+        patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls,
+        patch(PATCH_TCP_HANDLER),
+    ):
         instance = mock_cls.return_value
         instance.connect = AsyncMock(side_effect=RuntimeError("Unexpected"))
         instance.disconnect = AsyncMock()
@@ -143,7 +157,10 @@ async def test_user_flow_already_configured(hass: HomeAssistant) -> None:
     )
     entry.add_to_hass(hass)
 
-    with patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls:
+    with (
+        patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls,
+        patch(PATCH_TCP_HANDLER),
+    ):
         instance = mock_cls.return_value
         instance.connect = AsyncMock()
         instance.disconnect = AsyncMock()
@@ -165,7 +182,11 @@ async def test_user_flow_already_configured(hass: HomeAssistant) -> None:
 
 async def test_import_flow_success(hass: HomeAssistant) -> None:
     """Test successful YAML import flow."""
-    with patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls:
+    with (
+        patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls,
+        patch(PATCH_TCP_HANDLER),
+        patch(PATCH_SETUP_ENTRY, return_value=True),
+    ):
         instance = mock_cls.return_value
         instance.connect = AsyncMock()
         instance.disconnect = AsyncMock()
@@ -189,7 +210,10 @@ async def test_import_flow_success(hass: HomeAssistant) -> None:
 
 async def test_import_flow_cannot_connect(hass: HomeAssistant) -> None:
     """Test YAML import flow with connection error."""
-    with patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls:
+    with (
+        patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls,
+        patch(PATCH_TCP_HANDLER),
+    ):
         instance = mock_cls.return_value
         instance.connect = AsyncMock(side_effect=ConnectionRefusedError)
         instance.disconnect = AsyncMock()
@@ -222,7 +246,10 @@ async def test_import_flow_already_configured(hass: HomeAssistant) -> None:
     )
     entry.add_to_hass(hass)
 
-    with patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls:
+    with (
+        patch(PATCH_RNET_CLIENT, autospec=True) as mock_cls,
+        patch(PATCH_TCP_HANDLER),
+    ):
         instance = mock_cls.return_value
         instance.connect = AsyncMock()
         instance.disconnect = AsyncMock()
