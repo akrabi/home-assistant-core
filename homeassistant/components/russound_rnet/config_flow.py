@@ -250,9 +250,7 @@ class RussoundRNETConfigFlow(ConfigFlow, domain=DOMAIN):
 
         schema: VolDictType = {}
         for zone_id in self._selected_zones:
-            schema[
-                vol.Required(f"zone_{zone_id}", default=f"Zone {zone_id}")
-            ] = str
+            schema[vol.Required(f"zone_{zone_id}", default=f"Zone {zone_id}")] = str
 
         return self.async_show_form(
             step_id="zone_names",

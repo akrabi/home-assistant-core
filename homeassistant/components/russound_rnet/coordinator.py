@@ -63,14 +63,10 @@ class RussoundRNETCoordinator(DataUpdateCoordinator[dict[int, RNETZoneInfo]]):
             controller_id = math.ceil(zone_id / 6)
             zone_within = (zone_id - 1) % 6 + 1
             try:
-                info = await self.client.get_all_zone_info(
-                    controller_id, zone_within
-                )
+                info = await self.client.get_all_zone_info(controller_id, zone_within)
             except RNET_EXCEPTIONS as err:
                 # Reconnect once and retry this zone
-                _LOGGER.debug(
-                    "Poll failed for zone %s, reconnecting: %s", zone_id, err
-                )
+                _LOGGER.debug("Poll failed for zone %s, reconnecting: %s", zone_id, err)
                 with contextlib.suppress(*RNET_EXCEPTIONS):
                     await self.client.disconnect()
                 try:

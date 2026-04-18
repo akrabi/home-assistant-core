@@ -78,9 +78,7 @@ async def async_setup_entry(
             zone_id = int(zone_id_str)
             identifier = (DOMAIN, f"{config_entry.entry_id}_{zone_id}")
 
-            entries = er.async_entries_for_config_entry(
-                ent_reg, config_entry.entry_id
-            )
+            entries = er.async_entries_for_config_entry(ent_reg, config_entry.entry_id)
             for entry in entries:
                 if entry.unique_id == f"{config_entry.entry_id}_{zone_id}":
                     ent_reg.async_remove(entry.entity_id)
@@ -90,9 +88,7 @@ async def async_setup_entry(
                 dev_reg.async_remove_device(device.id)
 
 
-class RussoundRNETDevice(
-    CoordinatorEntity[RussoundRNETCoordinator], MediaPlayerEntity
-):
+class RussoundRNETDevice(CoordinatorEntity[RussoundRNETCoordinator], MediaPlayerEntity):
     """Representation of a Russound RNET device."""
 
     _attr_supported_features = (
